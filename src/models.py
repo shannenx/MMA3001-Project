@@ -12,7 +12,7 @@ from typing import Callable
 
 from sklearn.dummy import DummyRegressor
 from sklearn.ensemble import HistGradientBoostingRegressor, RandomForestRegressor
-from sklearn.linear_model import Ridge
+from sklearn.linear_model import LinearRegression, Ridge
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
@@ -24,6 +24,8 @@ def baseline_models() -> dict[str, Callable[[], object]]:
 
     * ``mean``: always predicts the training-set mean RUL. Any useful model
       must beat this.
+    * ``linear``: ordinary least squares (minimises the residual sum of
+      squares, no penalty) on the raw inputs.
     * ``ridge``: linear regression with L2 regularisation on standardised
       inputs.
     * ``random_forest``: 100 trees, fixed seed.
@@ -34,6 +36,7 @@ def baseline_models() -> dict[str, Callable[[], object]]:
     """
     return {
         "mean": lambda: DummyRegressor(strategy="mean"),
+        "linear": lambda: LinearRegression(),
         "ridge": lambda: make_pipeline(StandardScaler(), Ridge(alpha=1.0)),
         "random_forest": lambda: RandomForestRegressor(
             n_estimators=100, random_state=RANDOM_SEED, n_jobs=-1

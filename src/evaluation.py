@@ -140,7 +140,12 @@ def cross_validate(
 
     Returns:
         One row per fold with columns ``fold``, ``rmse``, ``mae``,
-        ``nasa_score``, ``fit_s`` and ``predict_s``.
+        ``nasa_score``, ``train_rmse``, ``fit_s`` and ``predict_s``.
+        ``train_rmse`` is the error on the fold's own training engines,
+        measured against the training labels (capped at ``cap``). Compared
+        with ``rmse`` it shows overfitting: a much lower training error than
+        validation error means the model has memorised noise. It is computed
+        outside the ``predict_s`` timer.
 
     Raises:
         ValueError: If ``train`` lacks ``RUL``/``engine`` or any feature column.
@@ -164,12 +169,74 @@ def cross_validate(
         t1 = time.perf_counter()
         pred = model.predict(X[va])
         t2 = time.perf_counter()
+        train_pred = model.predict(X[tr])
         rows.append({
             "fold": fold,
             "rmse": rmse(y_eval[va], pred),
             "mae": mae(y_eval[va], pred),
             "nasa_score": nasa_score(y_eval[va], pred),
+            "train_rmse": rmse(y[tr], train_pred),
             "fit_s": t1 - t0,
             "predict_s": t2 - t1,
         })
     return pd.DataFrame(rows)
+
+
+def out_of_fold_predictions(
+    model_factory: Callable[[], object],
+    train: pd.DataFrame,
+    feature_cols: list[str],
+    cap: int | None = 125,
+    n_splits: int = 5,
+    eval_cap: int | None | str = "same",
+) -> pd.DataFrame:
+    """Predict every training row using a model that never saw its engine.
+
+    Uses the same grouped folds as :func:`cross_validate`. Each row is
+    predicted by the fold-model whose training part excluded that row's
+    engine, so these are honest validation predictions for the whole
+    training set. Use them to see *where* the model is wrong, for example by
+    plotting error against true RUL.
+
+    Args:
+        model_factory: Zero-argument function returning an unfitted model.
+        train: Training table with ``engine``, ``cycle``, ``RUL`` and the
+            feature columns.
+        feature_cols: Columns used as model inputs.
+        cap: Cap applied to the training labels (``None`` for none).
+        n_splits: Number of folds.
+        eval_cap: Cap applied to the true values reported in ``true``
+            (``"same"`` uses ``cap``).
+
+    Returns:
+        One row per training row with columns ``engine``, ``cycle``, ``true``,
+        ``pred`` and ``error`` (``pred - true``; positive means the model
+        predicted too much remaining life, i.e. a late prediction).
+
+    Raises:
+        ValueError: If ``train`` lacks a required column.
+    """
+    needed = ["engine", "cycle", "RUL"] + list(feature_cols)
+    missing = [c for c in needed if c not in train.columns]
+    if missing:
+        raise ValueError(f"train is missing required columns: {missing}")
+
+    X = train[feature_cols].to_numpy()
+    y_raw = train["RUL"].to_numpy(dtype=float)
+    y = y_raw if cap is None else np.minimum(y_raw, cap)
+    val_cap = cap if isinstance(eval_cap, str) and eval_cap == "same" else eval_cap
+    y_eval = y_raw if val_cap is None else np.minimum(y_raw, val_cap)
+
+    pred = np.full(len(train), np.nan)
+    for tr, va in grouped_splits(train["engine"], n_splits):
+        model = model_factory()
+        model.fit(X[tr], y[tr])
+        pred[va] = model.predict(X[va])
+
+    return pd.DataFrame({
+        "engine": train["engine"].to_numpy(),
+        "cycle": train["cycle"].to_numpy(),
+        "true": y_eval,
+        "pred": pred,
+        "error": pred - y_eval,
+    })

@@ -7,6 +7,7 @@ import pytest
 from src.data_loader import SENSOR_COLUMNS, SETTING_COLUMNS, add_rul
 from src.evaluation import (
     cross_validate,
+    out_of_fold_predictions,
     grouped_splits,
     mae,
     nasa_score,
@@ -156,3 +157,42 @@ def test_eval_cap_changes_the_validation_target():
     same = cross_validate(m, train, ["sensor_2"], cap=5, n_splits=3)["rmse"].mean()
     true_target = cross_validate(m, train, ["sensor_2"], cap=5, n_splits=3, eval_cap=None)["rmse"].mean()
     assert true_target > same  # judged against uncapped RUL, a cap-5 model looks worse
+
+
+# ----------------------------------------- linear model, training error, OOF
+
+def test_linear_model_is_available_and_recovers_a_line():
+    X = np.arange(20, dtype=float).reshape(-1, 1)
+    y = 3 * X.ravel() + 2
+    model = baseline_models()["linear"]().fit(X, y)
+    assert model.predict([[10.0]])[0] == pytest.approx(32.0)
+
+
+def test_cross_validate_reports_training_error():
+    train = _synthetic_train()
+    res = cross_validate(baseline_models()["linear"], train, ["sensor_2"], cap=None)
+    assert "train_rmse" in res.columns
+    assert (res["train_rmse"] >= 0).all()
+
+
+def test_flexible_model_has_lower_training_than_validation_error():
+    # Pure-noise features: a flexible model memorises training rows
+    # (low training error) but cannot generalise (high validation error).
+    train = _synthetic_train(n_engines=10, n_cycles=40)
+    noise_cols = ["sensor_3", "sensor_4", "sensor_7"]
+    res = cross_validate(baseline_models()["random_forest"], train, noise_cols, cap=None)
+    assert res["train_rmse"].mean() < res["rmse"].mean()
+
+
+def test_out_of_fold_predictions_cover_every_row_once():
+    train = _synthetic_train(n_engines=10, n_cycles=20)
+    oof = out_of_fold_predictions(baseline_models()["linear"], train, ["sensor_2"], cap=None)
+    assert len(oof) == len(train)
+    assert not oof["pred"].isna().any()
+    assert np.allclose(oof["error"], oof["pred"] - oof["true"])
+
+
+def test_out_of_fold_predictions_missing_column_raises():
+    train = _synthetic_train(n_engines=6)
+    with pytest.raises(ValueError, match="missing"):
+        out_of_fold_predictions(baseline_models()["mean"], train, ["nope"])
