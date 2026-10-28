@@ -141,3 +141,19 @@ def test_missing_column_raises():
 
 def test_default_stats_are_valid():
     assert set(DEFAULT_STATS) <= {"last", "mean", "std", "slope"}
+
+
+def test_last_window_rows_matches_the_full_table_approach():
+    """The fast path must give exactly what 'build every window, keep the last' gives."""
+    rng = np.random.default_rng(0)
+    rows = []
+    for eng, n in [(1, 12), (2, 7), (3, 20)]:
+        for c in range(1, n + 1):
+            rows.append({"engine": eng, "cycle": c, "a": rng.normal(), "b": rng.normal(), "RUL": n - c})
+    df = pd.DataFrame(rows)
+    for window in (1, 3, 7):
+        full = window_table(df, COLS, window, stats=("last", "mean", "std", "slope"))
+        expected = (full.loc[full.groupby("engine")["cycle"].idxmax()]
+                    .sort_values("engine").reset_index(drop=True))
+        got = last_window_rows(df, COLS, window, stats=("last", "mean", "std", "slope"))
+        pd.testing.assert_frame_equal(got, expected)

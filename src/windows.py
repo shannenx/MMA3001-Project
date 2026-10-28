@@ -118,24 +118,56 @@ def window_table(
             invalid or empty, or a required column is missing.
     """
     _check_args(df, feature_cols, window, stats)
+    return _build_rows(df, feature_cols, window, stats, last_only=False)
+
+
+def _build_rows(df, feature_cols, window, stats, last_only: bool) -> pd.DataFrame:
+    """Shared builder for :func:`window_table` and :func:`last_window_rows`.
+
+    Args:
+        df: Validated input table.
+        feature_cols: Sensor columns to summarise.
+        window: Window length.
+        stats: Statistics to compute.
+        last_only: If True, summarise only each engine's final window instead
+            of every window (about ``n_cycles`` times less work).
+
+    Returns:
+        The windowed table, ordered by engine and cycle.
+    """
     names = feature_names(list(feature_cols), stats)
-    pieces = []
-    for engine, g in df.sort_values(["engine", "cycle"]).groupby("engine", sort=True):
-        if len(g) < window:
+    d = df.sort_values(["engine", "cycle"])
+    eng = d["engine"].to_numpy()
+    cyc = d["cycle"].to_numpy()
+    vals = d[list(feature_cols)].to_numpy(dtype=float)
+    rul = d["RUL"].to_numpy() if "RUL" in d.columns else None
+
+    # Engine boundaries in the sorted arrays. All the work below is on NumPy
+    # arrays; building one small DataFrame per engine was the main cost
+    # (see notebooks/05_performance.ipynb).
+    starts = np.flatnonzero(np.r_[True, eng[1:] != eng[:-1]]) if len(eng) else np.array([], dtype=int)
+    ends = np.r_[starts[1:], len(eng)] if len(eng) else np.array([], dtype=int)
+
+    feats, e_parts, c_parts, r_parts = [], [], [], []
+    for s, e in zip(starts, ends):
+        if e - s < window:
             continue
-        feats = _window_stats(g[list(feature_cols)].to_numpy(dtype=float), window, stats)
-        piece = pd.DataFrame(feats, columns=names)
-        piece.insert(0, "cycle", g["cycle"].to_numpy()[window - 1:])
-        piece.insert(0, "engine", engine)
-        if "RUL" in g.columns:
-            piece.insert(2, "RUL", g["RUL"].to_numpy()[window - 1:])
-        pieces.append(piece)
-    if not pieces:
+        lo = e - window if last_only else s
+        f = _window_stats(vals[lo:e], window, stats)
+        feats.append(f)
+        e_parts.append(np.full(len(f), eng[s]))
+        c_parts.append(cyc[lo + window - 1:e])
+        if rul is not None:
+            r_parts.append(rul[lo + window - 1:e])
+    if not feats:
         return pd.DataFrame(columns=["engine", "cycle", *names])
-    out = pd.concat(pieces, ignore_index=True)
-    out["engine"] = out["engine"].astype(int)
-    out["cycle"] = out["cycle"].astype(int)
-    return out
+
+    data = {"engine": np.concatenate(e_parts).astype(int),
+            "cycle": np.concatenate(c_parts).astype(int)}
+    if rul is not None:
+        data["RUL"] = np.concatenate(r_parts)
+    out = pd.DataFrame(data)
+    return pd.concat([out, pd.DataFrame(np.vstack(feats), columns=names)], axis=1)
 
 
 def last_window_rows(
@@ -172,5 +204,4 @@ def last_window_rows(
             f"(shortest: {int(lengths.min())}); no padding is applied. "
             f"Use a window of at most {int(lengths.min())}."
         )
-    table = window_table(df, feature_cols, window, stats)
-    return table.loc[table.groupby("engine")["cycle"].idxmax()].sort_values("engine").reset_index(drop=True)
+    return _build_rows(df, feature_cols, window, stats, last_only=True)
