@@ -95,6 +95,8 @@ All random seeds are fixed (`RANDOM\_SEED = 0` in `src/models.py`). Timing resul
 
 The data is the NASA C-MAPSS turbofan engine degradation simulation data set (Saxena and Goebel, 2008), downloaded from the NASA Prognostics Data Repository. See `data/README.md` for provenance. No explicit licence was found on the NASA page; the data is redistributed here for coursework only. **The MIT licence in this repository covers the code, not the NASA data.**
 
+The data is the NASA C-MAPSS turbofan engine degradation simulation data set (Saxena and Goebel, 2008), downloaded from the NASA Prognostics Data Repository: https://data.nasa.gov/dataset/cmapss-jet-engine-simulated-data (the original archive is CMAPSSData.zip; only FD001 is used). See data/README.md for provenance.
+
 ## 8\. Method and validation design
 
 * **RUL labels:** last cycle minus current cycle for each training engine, capped at 125.
