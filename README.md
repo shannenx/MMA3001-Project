@@ -87,7 +87,7 @@ Package versions are pinned in `requirements.txt`. Different scikit-learn versio
 |`04\_windowed\_features.ipynb`|Window length, statistics, decision table, one-time test evaluation|
 |`05\_performance.ipynb`|Timing, memory, profiling, scalability, accuracy vs cost|
 
-4. Regenerate the HTML documentation: `python -m pdoc src -o docs/api`
+4. Regenerate the HTML documentation: `python -m pdoc src -o docs/api --docformat google`
 
 All random seeds are fixed (`RANDOM\_SEED = 0` in `src/models.py`). Timing results depend on the machine and will vary between runs.
 
